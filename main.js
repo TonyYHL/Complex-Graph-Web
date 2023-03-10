@@ -1,9 +1,11 @@
 const PI = Math.PI
+
 var canvas = document.querySelector("canvas");
 var c = canvas.getContext("2d");
 const WIDTH = 1428;
 const HEIGHT = 682;
 const ORIGIN = [714,341];
+const E = Math.E
 var screen = {
     x: 0,
     y: 682
@@ -11,16 +13,20 @@ var screen = {
 //every 62 px shift in y axies, y increase by a unit
 var zoom = 1;
 
-
 canvas.width = WIDTH;
 canvas.height = HEIGHT;
+const ZOOM_PER_CLICK = 1.15
+
+var skip_plot = 6 // When dragging aross the graph, the graph will plot every n points decrease CPU usage. 
 
 var points_list = [];
 var lines_list = [];
-var pause_graph = false;
+var transform = false;
+var macro_transform = false;
+var moving_pt = false;
 
-var custom_expression = false;
-var custom_expression_string = `x^2`;
+var custom_expression = true;
+var custom_expression_string = `x`;
 var pre_defined_function = 1;
 
 //===================================
@@ -41,6 +47,9 @@ function f(y = Complex) {
         return x;
     } else {
         let x_str = x.string;
+        if (custom_expression_string.length == 1) {
+            custom_expression_string = custom_expression_string + "+0"
+        }
         let expression_string = custom_expression_string.replace(/x/g, x_str);
         //console.log(y,x_str,custom_expression_string,"debug 1");
         //console.log(x,custom_expression_string,"debug 2");
@@ -53,7 +62,7 @@ var POINT_PER_LINE = 500;
 //toolbar
 const POINT_BAR = document.querySelector(".points");
 const LINE_BAR = document.querySelector(".lines");
-var show_points = true;
+var show_points = false;
 document.getElementById("new_point").addEventListener("click",function(){
 
     var x = get_x(714)
@@ -180,17 +189,21 @@ var mouse_drag = {
     y_px: undefined,
     dx_px: undefined,
     dy_px: undefined,
-    buttons: undefined
+    buttons: undefined,
 }
 window.addEventListener("mousemove",function(event) {
     mouse_drag.buttons = event.buttons;
-    refresh_screen();
+    if (moving_pt == true){
+        refresh_screen();
+    }
+    //refresh_screen();
 
     if (mouse_drag.buttons == 0) {
         mouse_drag.x_px = event.x;
         mouse_drag.y_px = event.y;
     }
     if (mouse_drag.buttons == 1) {
+        refresh_screen();
         mouse_drag.dx_px = event.x;
         mouse_drag.dy_px = event.y;
         screen.x += 2*(mouse_drag.dx_px - mouse_drag.x_px);
@@ -205,6 +218,11 @@ window.addEventListener("mousedown",function(event) {
     mouse.x = event.x;
     mouse.y = event.y;
     mouse.buttons = event.buttons;
+    refresh_screen();
+})
+window.addEventListener("mouseup",function() {
+    mouse_drag.buttons = 0;
+    refresh_screen();
 })
 
 class Circle {
@@ -220,9 +238,10 @@ class Circle {
         c.beginPath();
         c.arc(get_x_pixel(this.x),get_y_pixel(this.y),this.r, 0, PI *2, false);
         c.fillStyle = this.fill;
-        c.fill();
         c.strokeStyle = this.color;
         c.stroke();
+
+        c.fill();
 
         var str = "("+String(this.x) + ","+ String(this.y) + "i)"
         c.font = "20px Arial";
@@ -259,6 +278,8 @@ class Point extends Circle {
         this.div = document.createElement("div");
         this.index = index;
         this.line = line;
+        this.function_coordinates = undefined;//pixel
+        this.arrow = undefined;
     } 
 
     detect_click() {
@@ -267,10 +288,13 @@ class Point extends Circle {
                 mouse.buttons = 0; 
                 this.active = true;
                 this.clicked = true;
+                moving_pt = true;
             } else if (mouse.buttons == 1 && this.active == true){
                 mouse.buttons = 0; 
                 this.active = false;
                 this.clicked = true;
+                moving_pt = false;//
+                refresh_screen()
             }
         }
         if (mouse.buttons == 0) {
@@ -279,6 +303,7 @@ class Point extends Circle {
         if (this.active == true) {
             this.fill_color("rgb(255,0,0)");
             this.new_cord(get_x(mouse_drag.x_px),get_y(mouse_drag.y_px));
+            this.function_coordinates = undefined;
             if (this.line == undefined) {
                 this.html_element.value = "("+String(this.x) + "," +String(this.y)+")";
             } else {
@@ -288,7 +313,6 @@ class Point extends Circle {
             this.fill_color("rgb(0,0,0)");
         }
     }
-
     create_new_point() {
 
         this.html_element.value = "("+String(this.x) + "," +String(this.y)+")";
@@ -333,6 +357,16 @@ class Point extends Circle {
     delete_point() {
         POINT_BAR.removeChild(this.div);
     }
+    plot_function() {
+        if (this.function_coordinates == undefined) {
+            let number = new Complex(this.x,this.y);
+            let fnumber = f(number);
+            let new_x = fnumber.re;
+            let new_y = fnumber.im;
+            this.arrow = new Arrow(this.x,this.y,new_x,new_y);
+        } 
+        this.arrow.drawArrowhead();
+    }
 }
 class Line {
     constructor(p1 = Point, p2 = Point,index, color = "rgb(0,0,0)", width = 1) {
@@ -374,6 +408,7 @@ class Line {
         c.strokeStyle = "rgb(0,0,0)";
     }
     line_update_info() {
+        /* This is called when user changes the information of the line */
         this.function_coordinates = []
         this.html_element.value = "("+String(this.p1.x) + "," +String(this.p1.y)+"):("+String(this.p2.x)+","+String(this.p2.y)+")";
         this.update_vector();
@@ -459,7 +494,7 @@ class Line {
             x: this.vector.x,
             y: this.vector.y
         }
-        if (this.function_coordinates.length == 0) {
+        if (this.function_coordinates.length == 0) { // if the line dont have coordinate saved, it will carry out calculation
         for (i=0;i<POINT_PER_LINE;i++) {
             let point_1 = new Complex(this.p1.x+i*this.vector.x,this.p1.y+i*this.vector.y);
             let point_2 = new Complex(point_1.re+this.vector.x,point_1.im+this.vector.y);
@@ -474,10 +509,10 @@ class Line {
                 y: y2-y1
             }
             if (0 <= x1 <= WIDTH && 0 <= y1 <= HEIGHT) {
+
                 while (Math.pow((Math.pow(pixel_vector.x,2)+Math.pow(pixel_vector.y,2)),0.5) > 5) {
                     adjusted_vector.x /= 2;
                     adjusted_vector.y /=2;
-                    //console.log(adjusted_vector);
                     point_2 = new Complex(point_1.re+adjusted_vector.x,point_1.im+adjusted_vector.y);
                     fpoint_2 = f(point_2);
                     x2 = Math.ceil(get_x_pixel(fpoint_2.re));
@@ -503,23 +538,102 @@ class Line {
             }
             
             this.function_coordinates.push([fpoint_1.re,fpoint_1.im,fpoint_2.re,fpoint_2.im]);
-        }
+        } 
+        } else { // if the value is already calculated
+            if (mouse_drag.buttons == 1) { // when dragging, the resolution decrease.
+                let total_number = Math.floor(this.function_coordinates.length/skip_plot);
+                for (let i=0;i<total_number;i++) {
+                    let index = i * skip_plot
+                    let x1 = Math.ceil(get_x_pixel(this.function_coordinates[index][0]));
+                    let y1 = Math.ceil(get_y_pixel(this.function_coordinates[index][1]));
+                    let x2 = Math.ceil(get_x_pixel(this.function_coordinates[index][2]));
+                    let y2 = Math.ceil(get_y_pixel(this.function_coordinates[index][3]));
+                    //drawline
+                    c.beginPath();
+                    c.moveTo(x1,y1);
+                    c.lineTo(x2,y2);
+                    c.lineWidth = 5;
+                    c.strokeStyle = this.color
+                    c.stroke();
+                    c.lineWidth = 1;
+                    c.strokeStyle = "rgb(0,0,0)";
+                }
+            } else {
+                for (let i=0;i<this.function_coordinates.length;i++) {
+                    let x1 = Math.ceil(get_x_pixel(this.function_coordinates[i][0]));
+                    let y1 = Math.ceil(get_y_pixel(this.function_coordinates[i][1]));
+                    let x2 = Math.ceil(get_x_pixel(this.function_coordinates[i][2]));
+                    let y2 = Math.ceil(get_y_pixel(this.function_coordinates[i][3]));
+                    //drawline
+                    c.beginPath();
+                    c.moveTo(x1,y1);
+                    c.lineTo(x2,y2);
+                    c.lineWidth = 5;
+                    c.strokeStyle = this.color
+                    c.stroke();
+                    c.lineWidth = 1;
+                    c.strokeStyle = "rgb(0,0,0)";
+                }
+            }
+        } 
+    }
+    plot_function_macro() {
+        if (this.function_coordinates.length == 0) {
+        for (i=0;i<POINT_PER_LINE;i++) {
+            let point_1 = new Complex(this.p1.x+i*this.vector.x,this.p1.y+i*this.vector.y);
+            let point_2 = new Complex(point_1.re+this.vector.x,point_1.im+this.vector.y);
+            let fpoint_1 = f(point_1);
+            let fpoint_2 = f(point_2);
+            let x1 = Math.ceil(get_x_pixel(fpoint_1.re));
+            let y1 = Math.ceil(get_y_pixel(fpoint_1.im));
+            let x2 = Math.ceil(get_x_pixel(fpoint_2.re));
+            let y2 = Math.ceil(get_y_pixel(fpoint_2.im));
+            c.beginPath();
+            c.moveTo(x1,y1);
+            c.lineTo(x2,y2);
+            c.lineWidth = 5;
+            c.strokeStyle = this.color
+            c.stroke();
+            c.lineWidth = 1;
+            c.strokeStyle = "rgb(0,0,0)";
+            this.function_coordinates.push([fpoint_1.re,fpoint_1.im,fpoint_2.re,fpoint_2.im]);
+            }
         } else {
             //console.log(this.function_coordinates[0]);
-            for (let i=0;i<this.function_coordinates.length;i++) {
-                let x1 = Math.ceil(get_x_pixel(this.function_coordinates[i][0]));
-                let y1 = Math.ceil(get_y_pixel(this.function_coordinates[i][1]));
-                let x2 = Math.ceil(get_x_pixel(this.function_coordinates[i][2]));
-                let y2 = Math.ceil(get_y_pixel(this.function_coordinates[i][3]));
-                //drawline
-                c.beginPath();
-                c.moveTo(x1,y1);
-                c.lineTo(x2,y2);
-                c.lineWidth = 5;
-                c.strokeStyle = this.color
-                c.stroke();
-                c.lineWidth = 1;
-                c.strokeStyle = "rgb(0,0,0)";
+            if (mouse_drag.buttons == 1) { // when dragging, the resolution decrease.
+                let total_number = Math.floor(this.function_coordinates.length/skip_plot);
+                for (let i=0;i<total_number;i++) {
+                    let index = i * skip_plot
+                    let x1 = Math.ceil(get_x_pixel(this.function_coordinates[index][0]));
+                    let y1 = Math.ceil(get_y_pixel(this.function_coordinates[index][1]));
+                    let x2 = Math.ceil(get_x_pixel(this.function_coordinates[index][2]));
+                    let y2 = Math.ceil(get_y_pixel(this.function_coordinates[index][3]));
+                    //drawline
+                    c.beginPath();
+                    c.moveTo(x1,y1);
+                    c.lineTo(x2,y2);
+                    c.lineWidth = 5;
+                    c.strokeStyle = this.color
+                    c.stroke();
+                    c.lineWidth = 1;
+                    c.strokeStyle = "rgb(0,0,0)";
+                }
+            } else {
+                for (let i=0;i<this.function_coordinates.length;i++) {
+                    let x1 = Math.ceil(get_x_pixel(this.function_coordinates[i][0]));
+                    let y1 = Math.ceil(get_y_pixel(this.function_coordinates[i][1]));
+                    let x2 = Math.ceil(get_x_pixel(this.function_coordinates[i][2]));
+                    let y2 = Math.ceil(get_y_pixel(this.function_coordinates[i][3]));
+                    //drawline
+                    c.beginPath();
+                    c.moveTo(x1,y1);
+                    c.lineTo(x2,y2);
+                    c.lineWidth = 5;
+                    c.strokeStyle = this.color
+                    c.stroke();
+                    c.lineWidth = 1;
+                    c.strokeStyle = "rgb(0,0,0)";
+                }
             }
         } 
     }
@@ -537,7 +651,7 @@ class Axies {
         } else if (this.pixel > HEIGHT) {
             this.number += 12;
         }
-        var str = String(this.number*zoom) + "i";
+        var str = (this.number*zoom).toFixed(2) + "i";
         c.font = "20px Arial";
         if (get_x_pixel(0) < 0){
             c.fillText(str,0,this.pixel);
@@ -563,7 +677,7 @@ class Axies {
         } else if (this.pixel > WIDTH) {
             this.number -= 22;
         }
-        var str = String(this.number*zoom);
+        var str = (this.number*zoom).toFixed(2);
         c.font = "20px Arial";
         if (get_y_pixel(0) < 30){
             c.fillText(str,this.pixel,30);
@@ -588,7 +702,66 @@ function draw_rect(x1,y1,x2,y2,color = "rgb(0,0,0)") {
     c.fillStyle = color;
     c.fillRect(x1,y1,x2,y2);
 }
+class Arrow {
+    constructor(x1,y1,x2,y2) {
+        //parameter takes in number instead of pixel!!
+        this.point_1 = {
+            x: get_x_pixel(x1),
+            y: get_y_pixel(y1)
+        };
+        this.point_2 = {
+            x: get_x_pixel(x2),
+            y: get_y_pixel(y2)
+        }
+    }
+    drawArrowhead() {
+        
+        var from = {
+            x:this.point_1.x,
+            y:this.point_1.y}
+        var to = {
+            x: this.point_2.x,
+            y: this.point_2.y
+        }
+        var radius = 5
 
+        var x_center = to.x;
+        var y_center = to.y;
+
+        var angle;
+        var x;
+        var y;
+    
+        c.beginPath();
+    
+        angle = Math.atan2(to.y - from.y, to.x - from.x)
+        x = radius * Math.cos(angle) + x_center;
+        y = radius * Math.sin(angle) + y_center;
+    
+        c.moveTo(x, y);
+    
+        angle += (1.0/3.0) * (2 * Math.PI)
+        x = radius * Math.cos(angle) + x_center;
+        y = radius * Math.sin(angle) + y_center;
+    
+        c.lineTo(x, y);
+    
+        angle += (1.0/3.0) * (2 * Math.PI)
+        x = radius *Math.cos(angle) + x_center;
+        y = radius *Math.sin(angle) + y_center;
+    
+        c.lineTo(x, y);
+
+        c.closePath();
+    
+        c.fill();
+
+        c.beginPath();
+        c.moveTo(this.point_1.x,this.point_1.y);
+        c.lineTo(this.point_2.x,this.point_2.y);
+        c.stroke();
+    }
+}
 var point = new Point(0,0,5);
 var point2 = new Point(2,2,5);
 var x_axiesArray = [];
@@ -601,16 +774,31 @@ for (let i = -11; i < 11; i++) {
 }
 
 function refresh_screen() {
+    /*Completely refresh the screen. Replot every single line or function. */
     c.clearRect(0,0,innerWidth,innerHeight);
     
     update_axies();
+
+    //points
     for (i=0;i<points_list.length;i++){
         if (show_points == true) {
             points_list[i].draw_circle();
             points_list[i].detect_click();
+        } 
+        if (transform == true) {
+            points_list[i].plot_function();
         }
     }
-    if (pause_graph == true) {
+
+    //lines
+    if (macro_transform == true) {
+        for (let i=0;i<lines_list.length;i++){
+            let line = lines_list[i]
+            if (line.is_hidden == false) {
+                line.plot_function_macro();
+            }
+        }
+    } else if (transform == true) {
         for (let i=0;i<lines_list.length;i++){
             let line = lines_list[i]
             if (line.is_hidden == false) {
@@ -626,7 +814,6 @@ function refresh_screen() {
         }
     }
 }
-
 function update_axies() {
     for (var i = 0; i < x_axiesArray.length; i++) {
         x_axiesArray[i].draw_axies_x();
@@ -637,6 +824,10 @@ function update_axies() {
 }
 refresh_screen();
 document.getElementById("clear_graph").addEventListener("click",function(){
+    screen = {
+        x: 0,
+        y: 682
+    };
     for (i=0;i<lines_list.length;i++){
         lines_list[i].delete_line();
     }
@@ -648,7 +839,33 @@ document.getElementById("clear_graph").addEventListener("click",function(){
     refresh_screen();
 })
 document.getElementById("transform").addEventListener("click",function(){
-    pause_graph = !pause_graph;
+    transform = !transform;
+    if (transform == true) {
+        document.getElementById("transform").innerHTML = "Stop";
+        macro_transform = false
+        document.getElementById("macro_transform").innerHTML = "Macro Transform";
+        for (i=0;i<lines_list.length;i++) {
+            let line = lines_list[i]
+            line.function_coordinates = [];
+        }
+    } else {
+        document.getElementById("transform").innerHTML = "Transform";
+    }
+    refresh_screen();
+})
+document.getElementById("macro_transform").addEventListener("click",function(){
+    macro_transform = !macro_transform;
+    if (macro_transform == true) {
+        document.getElementById("macro_transform").innerHTML = "Stop";
+        transform = false
+        document.getElementById("transform").innerHTML = "Transform";
+        for (i=0;i<lines_list.length;i++) {
+            let line = lines_list[i]
+            line.function_coordinates = [];
+        }
+    } else {
+        document.getElementById("macro_transform").innerHTML = "Macro Transform";
+    }
     refresh_screen();
 })
 document.getElementById("hide_points").addEventListener("click",function(){
@@ -665,7 +882,7 @@ document.getElementById("zoom_in").addEventListener("click",function(){
         x: screen.x,
         y: screen.y
     }
-    zoom /= 2
+    zoom /= ZOOM_PER_CLICK
     screen.x = screen_zoom_adjust.x
     screen.y = screen_zoom_adjust.y
     refresh_screen();
@@ -675,7 +892,7 @@ document.getElementById("zoom_out").addEventListener("click",function(){
         x: screen.x,
         y: screen.y
     }
-    zoom *= 2
+    zoom *= ZOOM_PER_CLICK
     screen.x = screen_zoom_adjust.x
     screen.y = screen_zoom_adjust.y
     refresh_screen();
@@ -716,7 +933,7 @@ class Complex {
     get abs() {
         return Math.pow((Math.pow(this.re,2)+Math.pow(this.im,2)),0.5);
     }
-    get arg() {
+    get arg_deprecated() {
         let y = this.imaginary
         let x = this.real
         if (x==0&&y>=0) {
@@ -737,8 +954,13 @@ class Complex {
             return Math.atan(y/x);
         }
     }
+    get arg() {
+        let y = this.imaginary
+        let x = this.real
+        return Math.atan2(y,x);
+    }
     get string() {
-        return "("+String(this.real)+"+"+String(this.imaginary)+"i"+")";
+        return "("+String(this.real.toFixed(12))+"+"+String(this.imaginary.toFixed(12))+"i"+")";
     }
     plus(x) {
         this.real += x.real;
@@ -796,6 +1018,12 @@ class Complex {
     }
     
 }
+
+const I = new Complex(0,1)
+const MINUS_ONE = new Complex(-1,0)
+const ONE = new Complex(1,0)
+const HALF = new Complex(0.5,0)
+
 function sin(x = Complex) {
     let re = x.re;
     let im = x.im;
@@ -820,6 +1048,61 @@ function tan(x = Complex) {
     x.real = real_part;
     x.imaginary = imag_part;
 }
+function exp(x = Complex) {
+    let e = new Complex(E,0);
+    e.power(x);
+    x.real = e.re;
+    x.imaginary = e.im;
+}
+function ln(x = Complex) {
+    arg = x.arg;
+    abs = x.abs
+    x.imaginary = arg;
+    x.real = Math.log(abs);
+}
+function arcsin(x = Complex) {
+    let a = new Complex(x.re,x.im)
+    let b = new Complex(x.re,x.im)
+    a.multiply_by(I)
+    b.power(2)
+    b.multiply_by(MINUS_ONE)
+    b.plus(ONE)
+    b.power(0.5)
+    a.plus(b)
+    ln(a)
+    a.multiply_by(I)
+    a.multiply_by(MINUS_ONE)
+    x.real = a.re
+    x.imaginary = a.im
+}
+function arccos(x = Complex) {
+    let a = new Complex(x.re,x.im)
+    let b = new Complex(x.re,x.im)
+    b.power(2)
+    b.minus(ONE)
+    b.power(0.5)
+    a.plus(b)
+    ln(a)
+    a.multiply_by(I)
+    a.multiply_by(MINUS_ONE)
+    x.real = a.re
+    x.imaginary = a.im
+}
+function arctan(x = Complex) {
+    let a = new Complex(x.re,x.im)
+    let b = new Complex(x.re,x.im)
+    a.multiply_by(I)
+    a.multiply_by(MINUS_ONE)
+    a.plus(ONE)
+    b.multiply_by(I)
+    b.plus(ONE)
+    a.divide_by(b)
+    ln(a)
+    a.multiply_by(I)
+    a.multiply_by(HALF)
+    x.real = a.re
+    x.imaginary = a.im
+}
 class evaluation {
     constructor(string,a=undefined,b=undefined) {
         this.string = string;
@@ -833,16 +1116,28 @@ class evaluation {
         let test_operations = ["+","-","*","/","^"];
         for (let i=0;i<test_operations.length;i++) {
             if (this.operation == undefined) {
-                if (this.have_operation(this.string,test_operations[i]) == true) {
+                if (this.have_operation(test_operations[i]) == true) {
                     this.operation = test_operations[i];
                     break
                 }
+                
             }
         }
 
         let bracket = 0;
         let first_bracket = false;
         if (this.operation == undefined) {
+            if (this.string[0] == "-") {
+                if (this.string.includes("i",this.string.length-1)) {
+                    if (this.string.length == 2) {
+                        this.string = "-1i";
+                    }
+                    this.a = new Complex(0,parseFloat(this.string.slice(0,-1)));
+                } else {
+                    this.a = new Complex(parseFloat(this.string),0);
+                }
+                return this.a;
+            }
             if (this.string.includes("i",this.string.length-1)) {
                 if (this.string.length == 1) {
                     this.string = "1i";
@@ -850,10 +1145,17 @@ class evaluation {
                 this.a = new Complex(0,parseFloat(this.string.slice(0,-1)))
                 return this.a;
             } else {
-                //special functions
-                this.a = this.string;
+                if (isNaN(this.string) == true) {
+                    //special functions
+                    this.a = this.string;
+                    return this.calculate(undefined);
+                } else {
+                    this.a = new Complex(parseFloat(this.string),0)
+                    return this.a
+                }
             }
         }
+
         for (let i=0;i<this.string.length;i++) {
             let character = this.string[i];
             if (character == "(") {
@@ -867,37 +1169,41 @@ class evaluation {
             if (first_bracket == true && i != this.string.length-1 && this.string[i] == ")" && bracket == 0) {
                 first_bracket = false;
             }
-            if (character == this.operation && bracket == 0) {
-                this.a = this.string.slice(0,i);
-                this.b = this.string.slice(i+1,this.string.length);
+            if (character == this.operation && bracket == 0 && i != 0) {
+                this.a = this.string.substring(0,i);
+                this.b = this.string.substring(i+1,this.string.length);
                 break
             }
         }
+
+
         if (first_bracket == true) {
-            this.string = string.slice(1,string.length-1);
+            this.string = this.string.substring(1,string.length-1);
         }
+
+
 
         this.re_evaluate();
 
         return this.calculate(this.operation);
     }
-    have_operation(str,operation) {
+    have_operation(operation) {
         let bracket = 0
-        let character = 0
-        let string = str
-        for (let i=0; i<string.length; i++) {
-            character = string[i];
+        let string = this.string
+        for (let i=0; i<this.string.length; i++) {
+            let character = string[i]
             if (character == "(") {
                 bracket += 1;
             } else if (character == ")") {
                 bracket -= 1;
             } else if (character == operation && bracket == 0) {
-                return true;
+                if (!(operation == "-" && i ==0)) {
+                    return true;
+                }
             }
         }
         return false;
     }
-
     remove_bracket(string_) {
         let bracket = 0;
         let first_bracket = false;
@@ -913,35 +1219,87 @@ class evaluation {
                 bracket -= 1;
             }
             if (first_bracket == true && i != string.length-1 && string[i] == ")" && bracket == 0) {
-                first_bracket == false;
+                first_bracket = false;
             }
         }
         if (first_bracket == true) {
-            string = string.slice(1,string.length-1);
+            string = string.substring(1,string.length-1);
         }
         return string;
     }
     re_evaluate() {
         if (this.a != undefined) {
             this.a = this.remove_bracket(this.a);
-            if (isNaN(this.a) == true && typeof(this.a) != "object") {
+            if (isNaN(this.a) == true && this.a instanceof Complex != true) {
                 let new_expression = new evaluation(this.a);
                 this.a = new_expression.evaluate();
-            } else if (typeof(this.a) != "object") {
+            } else if (this.a instanceof Complex != true) {
                 this.a = new Complex(parseFloat(this.a),0);
             }
         }
         if (this.b != undefined) {
             this.b = this.remove_bracket(this.b);
-            if (isNaN(this.b) == true && typeof(this.b) != "object") {
+            if (isNaN(this.b) == true && this.b instanceof Complex != true) {
                 let new_expression = new evaluation(this.b);
                 this.b = new_expression.evaluate();
-            } else if (typeof(this.b) != "object") {
+            } else if (this.b instanceof Complex != true) {
                 this.b = new Complex(parseFloat(this.b),0);
             }
         }
     }
     calculate(operation) {
+        if (this.a instanceof Complex != true) {
+            if (this.a.substring(0,3) == "sin") {
+                this.a = this.a.substring(4,this.a.length-1)
+                this.re_evaluate()
+                sin(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,3) == "cos") {
+                this.a = this.a.substring(4,this.a.length-1)
+                this.re_evaluate()
+                cos(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,3) == "tan") {
+                this.a = this.a.substring(4,this.a.length-1)
+                this.re_evaluate()
+                tan(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,1) == "e") {
+                this.a = this.a.substring(2,this.a.length-1)
+                this.re_evaluate()
+                exp(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,2) == "ln") {
+                this.a = this.a.substring(3,this.a.length-1)
+                this.re_evaluate()
+                ln(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,6) == "arcsin") {
+                this.a = this.a.substring(7,this.a.length-1)
+                this.re_evaluate()
+                arcsin(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,6) == "arccos") {
+                this.a = this.a.substring(7,this.a.length-1)
+                this.re_evaluate()
+                arccos(this.a)
+                return this.a
+            }
+            if (this.a.substring(0,6) == "arctan") {
+                this.a = this.a.substring(7,this.a.length-1)
+                this.re_evaluate()
+                arctan(this.a)
+                return this.a
+            }
+        }
+
+
         if (operation == "+") {
             this.a.plus(this.b);
             return this.a
@@ -960,38 +1318,75 @@ class evaluation {
         }
     }
 }
-document.getElementById("f1").addEventListener("click", function() {
-    pre_defined_function = 1;
-    document.getElementById("function_input").placeholder = "f(x) = x^2";
-    custom_expression = false;
-    refresh_screen();
-})
-document.getElementById("f2").addEventListener("click", function() {
-    pre_defined_function = 2;
-    document.getElementById("function_input").placeholder = "f(x) = sin(x)";
-    custom_expression = false;
-    refresh_screen();
-})
-document.getElementById("f3").addEventListener("click", function() {
-    pre_defined_function = 3;
-    document.getElementById("function_input").placeholder = "f(x) = cos(x)";
-    custom_expression = false;
-    refresh_screen();
-})
-document.getElementById("f4").addEventListener("click", function() {
-    pre_defined_function = 4;
-    document.getElementById("function_input").placeholder = "f(x) = tan(x)";
-    custom_expression = false;
-    refresh_screen();
+function interpret(expression) {
+    expression = expression.replace("exp","e");
+    return expression
+}
+var user_expression = "x"
+var input_index = 7;
+document.getElementById("function_input").addEventListener("click", (event) => {
+    input_index = event.target.selectionStart;
 })
 document.getElementById("function_input").addEventListener("keyup", (event) => {
     let input = document.getElementById("function_input");
+    input_index = event.target.selectionStart;
     if (event.key === "Enter") {
-        input.placeholder = "f(x) = " + input.value;
-        custom_expression_string = input.value;
-        alert("You are now using custom function! This will slow down the transform function! Any typo might will cause the graph not to show and you might need to refresh the page in order to fix it! ")
-        input.value = "";
+        //interpret
+        user_expression = input.value.substring(7);
+        console.log(user_expression)
+        custom_expression_string = interpret(user_expression);
         custom_expression = true;
+        input.style = "border-color: black";
         refresh_screen();
+    } else if (event.key == "Backspace") {
+        user_expression = user_expression.substring(0,user_expression.length-1);
+    } else if (event.key != "Shift" && event.key != "Control" && event.key != "Alt" && event.key != "ArrowLeft" && event.key != "ArrowRight" && event.key != "ArrowUp" && event.key != "ArrowDown" && event.key != "="){
+        input.style = "border-color: red";
     }
 })
+document.getElementById("f1").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"x^()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f2").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"sin()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f3").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"cos()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f4").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"tan()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f5").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"exp()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f6").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"ln()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f7").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"arcsin()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f8").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"arccos()"+input.value.substring(input_index,input.value.length);
+})
+document.getElementById("f9").addEventListener("click", function() {
+    let input = document.getElementById("function_input")
+    input.style = "border-color: red";
+    input.value = input.value.substring(0,input_index)+"arctan()"+input.value.substring(input_index,input.value.length);
+})
+//user_expression is used to display the expression to the user. after pressed enter, the user expression will be interpreted into custom_expression_string
