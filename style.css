@@ -14,32 +14,57 @@ body {
 }
 
 .toolbar {
+    display: grid;
     width: 300px;
     height: 1200px;
-    background-color: gray;
-    z-index: 0;
+    box-shadow: 0px 0px 30px 4px rgb(174 196 216 / 25%);
 }
 
 .utilities {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    background-color: whitesmoke;
+    z-index: 0;
+}
+
+.elements_container {
+    background-color: whitesmoke;
+    z-index: 0;
+}
+
+.utility_btns {
+    border-radius: 25px;
 }
 
 #transform,
+#macro_transform,
 #clear_graph,
 #hide_points,
 #zoom_out,
-#zoom_in {
+#zoom_in,
+#local_refine {
     margin: 5px;
     background-color: lightgray;
     z-index: 0;
+    border-radius: 1px;
 }
 #transform:hover,
+#macro_transform:hover,
 #clear_graph:hover,
 #hide_points:hover,
 #zoom_out:hover,
-#zoom_in:hover {
-    background-color: darkgray;
+#zoom_in:hover,
+#local_refine:hover {
+    background-color: white;
+}
+
+#transform:active,
+#macro_transform:active,
+#clear_graph:active,
+#hide_points:active,
+#zoom_out:active,
+#zoom_in:active,
+#local_refine:active {
+    background-color: rgb(173, 212, 212);
 }
 
 .new_element {
@@ -65,9 +90,10 @@ body {
 .lines,
 .points {
     overflow-y: scroll;
-    border: solid 5px;
     height: 230px;
+    box-shadow: 0px 0px 30px 4px rgb(174 196 216 / 25%);
 
+    background-color: white;
     display: grid;
     row-gap: 5px;
     z-index: 0;
@@ -115,6 +141,10 @@ input {
     height: 50px;
 }
 
+h2 {
+    font-size: 10px;
+}
+
 h3 {
     font-size: 15px;
 }
@@ -125,7 +155,6 @@ h3 {
     display: block;
     background-color: white;
     margin-right: 5px;
-    margin-left: 5px;
 }
 
 .setting_input {
@@ -152,4 +181,7 @@ h3 {
 
 .pre-defined_function_btn:active {
     opacity: 0.4;
+}
+#function_input:active {
+    border-color: green
 }
